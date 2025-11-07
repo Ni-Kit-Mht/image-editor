@@ -1,18 +1,8 @@
-# Welcome to your Lovable project
-
-## Project info
-
-**URL**: https://lovable.dev/projects/204b0003-2212-4e0f-8b4f-8059fbdf05ef
+# Welcome to your quick and easy image editor
 
 ## How can I edit this code?
 
 There are several ways of editing your application.
-
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/204b0003-2212-4e0f-8b4f-8059fbdf05ef) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
 
 **Use your preferred IDE**
 
@@ -60,15 +50,36 @@ This project is built with:
 - shadcn-ui
 - Tailwind CSS
 
-## How can I deploy this project?
+## How can I deploy this project using gh-pages?
+```sh
+# Step 1: Edit your package.json to add
+  "homepage": "https://<username>.github.io/<repository-name>",
+  "predeploy": "npm run build",
+  "deploy": "gh-pages -d dist",
 
-Simply open [Lovable](https://lovable.dev/projects/204b0003-2212-4e0f-8b4f-8059fbdf05ef) and click on Share -> Publish.
+# Step 2: Edit your vite.config.ts
+  export default defineConfig(({ mode }) => ({
+    base: mode === "development" ? "/" : "/image-editor/",
+  
+    server: {
+      host: "::",
+      port: 8080,
+    },
+  }));
 
-## Can I connect a custom domain to my Lovable project?
+# Step 3: In App.tsx
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<Index />} />
+          <Route path="/image-editor/" element={<Index />} />
+          <Route path="/image-editor" element={<Index />} />
+          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </BrowserRouter>
 
-Yes, you can!
+# Step 4: Start the deployment using
+npm run deploy
+```
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
 "# image-editor" 
