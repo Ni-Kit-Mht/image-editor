@@ -51,7 +51,7 @@ const Index = () => {
   const [selectedCrops, setSelectedCrops] = useState<Set<string>>(new Set());
   const [showPrintLayout, setShowPrintLayout] = useState(false);
   
-  const [dpi, setDpi] = useState(96);
+  const [dpi, setDpi] = useState(300);
   const [paperSize, setPaperSize] = useState<PaperSize>({ w: 4, h: 6 });
   const [paperPreset, setPaperPreset] = useState("4x6");
   const [customPaper, setCustomPaper] = useState({ w: "4", h: "6" });
@@ -71,25 +71,50 @@ const Index = () => {
     lastY: 0,
   });
 
-  const getScaleFactor = () => {
-    const screenH = window.innerHeight - 104;
-    const defaultPaperHIn = 6;
-    return screenH / (defaultPaperHIn * dpi);
-  };
+// Calculate display scale factor (for visual display only)
+const getDisplayScaleFactor = (paperWidthIn = 4, paperHeightIn = 6) => {
+  const screenW = window.innerWidth;
+  const screenH = window.innerHeight - 102;
 
-  const inchesToPx = (inches: number) => Math.round(inches * dpi * getScaleFactor());
+  // Scale to fit both width and height, preserving aspect ratio
+  const scaleX = screenW / (paperWidthIn * dpi);
+  const scaleY = screenH / (paperHeightIn * dpi);
+
+  // Use the smaller scale to ensure the paper fits in the screen
+  return Math.min(scaleX, scaleY, 1); // Cap at 1 to never scale up beyond actual size
+};
+
+// Convert inches to actual canvas pixels (at full DPI, not scaled for display)
+const inchesToPx = (inches: number) => Math.round(inches * dpi);
+
+// Convert inches to display pixels (scaled to fit screen)
+const inchesToDisplayPx = (inches: number) => Math.round(inches * dpi * getDisplayScaleFactor());
+
   const mmToIn = (mm: number) => mm / 25.4;
+
+  // Get the scale factor from display pixels to canvas pixels
+  const getCanvasScale = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return 1;
+    const rect = canvas.getBoundingClientRect();
+    return canvas.width / rect.width;
+  }, []);
 
   const updateCanvasSize = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    // Set canvas internal resolution to full DPI (high quality)
     const wPx = inchesToPx(paperSize.w);
     const hPx = inchesToPx(paperSize.h);
     canvas.width = wPx;
     canvas.height = hPx;
-    canvas.style.width = `${wPx}px`;
-    canvas.style.height = `${hPx}px`;
+    
+    // Set canvas display size to fit screen (scaled down for viewing)
+    const displayW = inchesToDisplayPx(paperSize.w);
+    const displayH = inchesToDisplayPx(paperSize.h);
+    canvas.style.width = `${displayW}px`;
+    canvas.style.height = `${displayH}px`;
   }, [paperSize, dpi]);
 
   const resetImageState = useCallback(() => {
@@ -406,14 +431,17 @@ const Index = () => {
     const dy = e.clientY - imageState.lastY;
     if (Math.abs(dx) > 1 || Math.abs(dy) > 1) setDragMoved(true);
     
+    // Scale the delta by the canvas scale factor
+    const canvasScale = getCanvasScale();
+    
     setImageState((prev) => ({
       ...prev,
-      offsetX: prev.offsetX + dx,
-      offsetY: prev.offsetY + dy,
+      offsetX: prev.offsetX + dx * canvasScale,
+      offsetY: prev.offsetY + dy * canvasScale,
       lastX: e.clientX,
       lastY: e.clientY,
     }));
-  }, [imageState.dragging, imageState.lastX, imageState.lastY]);
+  }, [imageState.dragging, imageState.lastX, imageState.lastY, getCanvasScale]);
 
   const handleMouseUp = useCallback(() => {
     setImageState((prev) => ({ ...prev, dragging: false }));
@@ -439,8 +467,11 @@ const Index = () => {
     const delta = -e.deltaY;
     const zoomFactor = Math.exp(delta * 0.0012);
     const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
+    
+    // Convert mouse position from display space to canvas pixel space
+    const canvasScale = getCanvasScale();
+    const mx = (e.clientX - rect.left) * canvasScale;
+    const my = (e.clientY - rect.top) * canvasScale;
     
     const beforeX = (mx - imageState.offsetX) / imageState.scale;
     const beforeY = (my - imageState.offsetY) / imageState.scale;
@@ -480,37 +511,34 @@ const Index = () => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
-  // Add this effect after the other useEffect hooks in Index.tsx
-// Around line 600, after the handleKeyDown useEffect
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-useEffect(() => {
-  const canvas = canvasRef.current;
-  if (!canvas) return;
+    const preventScroll = (e: WheelEvent) => {
+      // Check if mouse is over the canvas
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX;
+      const mouseY = e.clientY;
+      
+      const isInsideCanvas = 
+        mouseX >= rect.left &&
+        mouseX <= rect.right &&
+        mouseY >= rect.top &&
+        mouseY <= rect.bottom;
 
-  const preventScroll = (e: WheelEvent) => {
-    // Check if mouse is over the canvas
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX;
-    const mouseY = e.clientY;
-    
-    const isInsideCanvas = 
-      mouseX >= rect.left &&
-      mouseX <= rect.right &&
-      mouseY >= rect.top &&
-      mouseY <= rect.bottom;
+      if (isInsideCanvas) {
+        e.preventDefault();
+      }
+    };
 
-    if (isInsideCanvas) {
-      e.preventDefault();
-    }
-  };
+    // Add the event listener with passive: false to allow preventDefault
+    canvas.addEventListener('wheel', preventScroll, { passive: false });
 
-  // Add the event listener with passive: false to allow preventDefault
-  canvas.addEventListener('wheel', preventScroll, { passive: false });
-
-  return () => {
-    canvas.removeEventListener('wheel', preventScroll);
-  };
-}, []);
+    return () => {
+      canvas.removeEventListener('wheel', preventScroll);
+    };
+  }, []);
 
   const handleZoomChange = (value: number[]) => {
     if (!imageLoaded) return;
@@ -768,8 +796,8 @@ useEffect(() => {
                   <Slider
                     value={[targetClarity]}
                     onValueChange={handleClarityChange}
-                    min={-100}
-                    max={100}
+                    min={-10}
+                    max={10}
                     step={1}
                     className="mt-2"
                     disabled={!imageLoaded}
@@ -857,7 +885,7 @@ useEffect(() => {
                 {paperSize.w.toFixed(2)} in × {paperSize.h.toFixed(2)} in
               </div>
               <div className="text-xs text-muted-foreground">
-                Canvas: {inchesToPx(paperSize.w)} × {inchesToPx(paperSize.h)} px
+                Canvas: {inchesToPx(paperSize.w)} × {inchesToPx(paperSize.h)} px @ {dpi} DPI
               </div>
             </div>
 
@@ -938,6 +966,15 @@ useEffect(() => {
                           <li><strong>Adjust Image:</strong> Use sliders to modify brightness, contrast, saturation, clarity, and hue</li>
                           <li><strong>Zoom:</strong> Scroll mouse wheel or use the zoom slider</li>
                           <li><strong>Pan:</strong> Click and drag the image to reposition</li>
+                        </ul>
+                      </div>
+                      
+                      <div>
+                        <h3 className="font-semibold text-accent mb-2">High-Resolution Cropping</h3>
+                        <ul className="list-disc list-inside space-y-1 text-muted-foreground">
+                          <li><strong>DPI Setting:</strong> Choose 300 DPI for print quality or 600 DPI for maximum quality</li>
+                          <li><strong>Canvas Resolution:</strong> Higher DPI = more pixels in your cropped images</li>
+                          <li><strong>Example:</strong> 1.13" × 1.37" at 300 DPI = 339 × 411 pixels (vs 109 × 132 at 96 DPI)</li>
                         </ul>
                       </div>
                       
@@ -1046,16 +1083,21 @@ useEffect(() => {
                 )}
 
                 <div>
-                  <Label className="text-xs">DPI</Label>
+                  <Label className="text-xs">DPI (Resolution)</Label>
                   <Select value={dpi.toString()} onValueChange={(v) => setDpi(parseInt(v))}>
                     <SelectTrigger className="mt-1">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="96">96 DPI (screen)</SelectItem>
-                      <SelectItem value="300">300 DPI (print)</SelectItem>
+                      <SelectItem value="150">150 DPI (web)</SelectItem>
+                      <SelectItem value="300">300 DPI (print quality) ⭐</SelectItem>
+                      <SelectItem value="600">600 DPI (high quality)</SelectItem>
                     </SelectContent>
                   </Select>
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    Higher DPI = more pixels in cropped images
+                  </p>
                 </div>
               </div>
             </Card>
@@ -1145,6 +1187,9 @@ useEffect(() => {
                 <div>Crop size: {cropPxW} × {cropPxH} px</div>
                 <div>Resolution: {dpi} DPI</div>
                 <div>Physical: {cropSize.w.toFixed(2)} × {cropSize.h.toFixed(2)} in</div>
+                <div className="pt-2 text-[10px] border-t border-border mt-2">
+                  💡 At 300 DPI, your 1.13×1.37" crop will be {Math.round(1.13 * 300)}×{Math.round(1.37 * 300)}px
+                </div>
               </div>
             </Card>
 
